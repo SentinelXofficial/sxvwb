@@ -1,0 +1,25 @@
+# Binary (root only)
+/sxsc
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Checkpoint files
+.sxsc_checkpoint
+
+# Test output
+/tmp/
+result*.json
+
+# Dependencies (managed by go.mod)
+vendor/
+.claude/
+sxsc_checksums.txt
