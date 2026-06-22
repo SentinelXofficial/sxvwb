@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/SentinelXofficial/sxvwb/internal/banner"
@@ -849,6 +850,10 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 	var allResults []core.ScanResult
 	var mu sync.Mutex
 
+	// Request counters for progress display (xray-style status line)
+	var reqSent, reqFailed, reqTotalNS int64
+	client = core.NewCountingClient(client, &reqSent, &reqFailed, &reqTotalNS)
+
 	// ── Site-wide one-time checks (run once against root target) ──────────
 
 	// Sprint 3: WAF auto-detection (runs before any other scan)
@@ -929,26 +934,36 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, cfg.Threads)
 
-	// Progress tracking
-	var doneCount int
-	var doneMu sync.Mutex
+	// Progress tracking (xray-style status line)
+	var doneCount int64
 	totalTargets := len(targets)
 	spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	si := 0
 	progressDone := make(chan struct{})
 
 	go func() {
-		tick := time.NewTicker(120 * time.Millisecond)
+		tick := time.NewTicker(150 * time.Millisecond)
 		defer tick.Stop()
 		for {
 			select {
 			case <-progressDone:
 				return
 			case <-tick.C:
-				doneMu.Lock()
-				d := doneCount
-				doneMu.Unlock()
-				fmt.Printf("\r\033[K  %s Scanning... %d/%d URLs", spinner[si%len(spinner)], d, totalTargets)
+				scanned := int(atomic.LoadInt64(&doneCount))
+				pending := totalTargets - scanned
+				sent := int(atomic.LoadInt64(&reqSent))
+				failed := int(atomic.LoadInt64(&reqFailed))
+				ns := atomic.LoadInt64(&reqTotalNS)
+				var avgLatency time.Duration
+				if sent > 0 {
+					avgLatency = time.Duration(ns / int64(sent))
+				}
+				failPct := 0.0
+				if sent > 0 {
+					failPct = float64(failed) / float64(sent) * 100
+				}
+				fmt.Printf("\r\033[K  %s [*] scanned: %d, pending: %d, requestSent: %d, latency: %v, failedRatio: %.2f%%",
+					spinner[si%len(spinner)], scanned, pending, sent, avgLatency.Round(time.Microsecond), failPct)
 				si++
 			}
 		}
@@ -960,7 +975,7 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 		go func(t core.CrawlResult) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			defer func() { doneMu.Lock(); doneCount++; doneMu.Unlock() }()
+			defer func() { atomic.AddInt64(&doneCount, 1) }()
 
 			// ── Resume: skip already-completed URLs ────────────────────
 			if cfg.Checkpoint.IsScanned(t.URL) {

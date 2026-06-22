@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 	"time"
 )
 
@@ -185,3 +186,37 @@ type BaselineResult struct {
 	Length  int
 	Status  int
 }
+
+// CountingTransport wraps http.RoundTripper and increments atomic counters.
+type CountingTransport struct {
+	Base    http.RoundTripper
+	Sent    *int64
+	Failed  *int64
+	TotalNS *int64
+}
+
+func (ct *CountingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t0 := time.Now()
+	atomic.AddInt64(ct.Sent, 1)
+	resp, err := ct.Base.RoundTrip(req)
+	elapsed := time.Since(t0)
+	atomic.AddInt64(ct.TotalNS, int64(elapsed))
+	if err != nil {
+		atomic.AddInt64(ct.Failed, 1)
+	}
+	return resp, err
+}
+
+// NewCountingClient wraps an existing client with request counting for progress display.
+func NewCountingClient(client *http.Client, sent, failed, totalNS *int64) *http.Client {
+	tr := client.Transport
+	if tr == nil {
+		tr = http.DefaultTransport
+	}
+	return &http.Client{
+		Transport: &CountingTransport{Base: tr, Sent: sent, Failed: failed, TotalNS: totalNS},
+		Timeout:   client.Timeout,
+		CheckRedirect: client.CheckRedirect,
+	}
+}
+
