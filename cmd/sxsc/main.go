@@ -331,7 +331,7 @@ Examples:
 			*cachePoisonFlag = true
 			*lfiFlag = true
 			*smugglingFlag = true
-			*rateLimitTestFlag = true
+			// *rateLimitTestFlag = true — DISABLED from --all: triggers real WAF blacklists
 			*subTakeoverFlag = true
 			// Sprint B
 			*clutchFlag = true
@@ -1096,6 +1096,7 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 		allResults = append(allResults, modules.CheckSubdomainTakeover(client, cfg, target)...)
 	}
 	if cfg.RateLimitTest {
+		fmt.Printf("\033[33m[!] WARNING: --rate-limit-test sends 30 burst requests and may trigger WAF blacklists.\033[0m\n")
 		allResults = append(allResults, modules.TestRateLimiting(client, cfg, target)...)
 	}
 
