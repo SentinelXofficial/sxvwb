@@ -1,0 +1,5 @@
+internal/
+cmd/
+pkg/
+go.mod
+go.sum
