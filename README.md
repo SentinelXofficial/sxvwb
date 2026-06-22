@@ -1,67 +1,114 @@
-# SentinelX VWB — Vulnerability Web Scanner
+# SentinelX VWB
 
-Closed-source web vulnerability scanner.
+Open-source web vulnerability scanner. **Community-driven. Server-enforced policy.**
 
-## Download
+Built in Go. SQLi, XSS, SSRF, LFI, Command Injection, XXE, CSRF, JWT, GraphQL, WebSocket, and 30+ more modules.
 
-```bash
-# Linux amd64
-wget https://github.com/SentinelXofficial/sxvwb/releases/download/v1.0.0/sxvwb-linux-amd64
+## Quick Start
 
-# Linux 386
-wget https://github.com/SentinelXofficial/sxvwb/releases/download/v1.0.0/sxvwb-linux-386
-
-# Linux arm64
-wget https://github.com/SentinelXofficial/sxvwb/releases/download/v1.0.0/sxvwb-linux-arm64
-
-# macOS amd64 (Intel)
-wget https://github.com/SentinelXofficial/sxvwb/releases/download/v1.0.0/sxvwb-darwin-amd64
-
-# macOS arm64 (Apple Silicon)
-wget https://github.com/SentinelXofficial/sxvwb/releases/download/v1.0.0/sxvwb-darwin-arm64
-
-# Windows amd64
-wget https://github.com/SentinelXofficial/sxvwb/releases/download/v1.0.0/sxvwb-windows-amd64.exe
-
-# Windows 386
-wget https://github.com/SentinelXofficial/sxvwb/releases/download/v1.0.0/sxvwb-windows-386.exe
-
-# Checksums
-wget https://github.com/SentinelXofficial/sxvwb/releases/download/v1.0.0/sxvwb_checksums.txt
-```
-
-After download:
+### From Release (recommended)
 
 ```bash
+wget https://github.com/SentinelXofficial/sxvwb/releases/latest/download/sxvwb-linux-amd64
 chmod +x sxvwb-linux-amd64
 sudo mv sxvwb-linux-amd64 /usr/local/bin/sxvwb
 ```
 
-Verify checksum:
+### From Source
 
 ```bash
-sha256sum sxvwb-linux-amd64
-# Compare with sxvwb_checksums.txt
+git clone https://github.com/SentinelXofficial/sxvwb.git
+cd sxvwb
+go build -o sxvwb ./cmd/sxsc/
 ```
+
+### License Key
+
+```bash
+export SXVWB_LICENSE="sxvwb-xxxxxxxxxxxxxxxx-xxxxxxxx"
+```
+
+Get a license at [api.sentinelx.me](https://api.sentinelx.me).
 
 ## Usage
 
 ```bash
 sxvwb -u "https://target.com"
-sxvwb -u "https://target.com" --crawl --depth 3
+sxvwb -u "https://target.com" --crawl --depth 3 --waf-detect
 sxvwb -l targets.txt --all --json-output results.json
 sxvwb --help
 ```
 
+## Architecture
+
+```
+sxvwb (this repo)          sxvwb-server (private)
+  Open Source                 Validation & Policy
+  -------------------         -------------------
+  All scan modules            Domain blocklist
+  Crawler & engine            License management
+  CLI & reports               OOB callbacks
+  Templates (community)       Template sync
+       |                            |
+       +--- /api/v1/validate ------>|
+```
+
+**Policy enforcement is server-side.** The client calls `api.sentinelx.me` before every scan. Indonesian `.id` TLDs and protected platforms are blocked at the server level.
+
+## Features
+
+| Category | Modules |
+|----------|---------|
+| Injection | SQLi (Error/Blind/Boolean), NoSQLi, Command Injection, SSTI, CRLF |
+| Web | XSS (Reflected/DOM), Open Redirect, CSRF, Path Traversal, LFI/RFI |
+| Infrastructure | SSRF, XXE, JWT, GraphQL, WebSocket, gRPC, HTTP Smuggling |
+| Discovery | Subdomain Enum, Directory Brute, JS Endpoint Extraction |
+| Defense | WAF Detection + Auto-Bypass, Security Headers Audit, Rate Limit Test |
+| Advanced | Cache Poison, Proto Pollution, Deserialize, File Upload, IDOR |
+| Engine | Deep Crawl, Sieve, Forge, Chain, Merge, Strobe |
+| Output | HTML, JSON, CSV, Markdown, SARIF reports |
+
+## Community Templates
+
+Contribute scan templates to `sxvwb-templates`:
+
+```yaml
+id: cve-2024-example
+info:
+  name: Example CVE
+  severity: critical
+requests:
+  - method: GET
+    path:
+      - "{{BaseURL}}/vulnerable-endpoint"
+    matchers:
+      - type: word
+        words:
+          - "vulnerable"
+```
+
 ## Restricted Domains
 
-Scanning is **NOT** allowed on:
+The following are blocked server-side and **cannot** be scanned:
 
-- All Indonesian `.id` TLDs (`.co.id`, `.go.id`, `.ac.id`, `.sch.id`, `.mil.id`, `.or.id`, `.net.id`, `.web.id`, `.my.id`, `.biz.id`, `.desa.id`, `.ponpes.id`, `.id`)
+- All Indonesian `.id` TLDs
 - `github.com`
 
-The binary will refuse to scan any of these domains.
+## Contributing
+
+1. Fork this repo
+2. Create feature branch
+3. Add module/feature with tests
+4. Submit PR
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-Proprietary — All rights reserved.
+MIT License — see [LICENSE](LICENSE).
+
+---
+
+**Maintainer**: [SentinelX Official](https://github.com/SentinelXofficial)
+**Server**: [api.sentinelx.me](https://api.sentinelx.me)
+**Templates**: [sxvwb-templates](https://github.com/SentinelXofficial/sxvwb-templates)
