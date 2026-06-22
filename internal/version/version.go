@@ -1,6 +1,6 @@
 package version
 
 const (
-	Current = "v1.1.2"
+	Current = "v1.2.0"
 	Repo    = "SentinelXofficial/sxvwb"
 )

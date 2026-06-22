@@ -884,110 +884,79 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 		allResults = append(allResults, engine.ScanSensitiveFiles(client, cfg, target)...)
 	}
 
-	// ── Collect crawl targets ───────────────────────────────────────────────
+	// ── Crawl + Scan Pipeline (streaming: interleaved crawl-then-scan) ───
 	var targets []core.CrawlResult
+	var targetsMu sync.Mutex
 	var seedURLs []string
+	var totalForms int
+	var totalURLs int // declared at function scope, assigned here
 
-	if cfg.Crawl || cfg.BasicCrawl {
-		if useRobots {
-			seedURLs = append(seedURLs, engine.ParseRobotsTxt(client, cfg, target)...)
-			seedURLs = append(seedURLs, engine.ParseSitemap(client, cfg, target)...)
-		}
-		d := cfg.Depth
-		if cfg.BasicCrawl {
-			d = 1
-		}
-		targets = engine.NewCrawler(client, cfg).Crawl(target, d)
-
-		// Build a set for O(1) duplicate detection instead of O(n^2)
-		seen := make(map[string]bool, len(targets))
-		for _, t := range targets {
-			seen[t.URL] = true
-		}
-		for _, su := range seedURLs {
-			if !seen[su] {
-				seen[su] = true
-				forms, _ := engine.FetchForms(client, cfg, su)
-				targets = append(targets, core.CrawlResult{URL: su, Forms: forms})
-			}
-		}
-	} else {
-		forms, _ := engine.FetchForms(client, cfg, target)
-		targets = []core.CrawlResult{{URL: target, Forms: forms}}
+	crawlEnabled := cfg.Crawl || cfg.BasicCrawl
+	depth := cfg.Depth
+	if cfg.BasicCrawl {
+		depth = 1
 	}
 
-	if cfg.JSEndpoints {
-		eps := engine.ExtractJSEndpoints(client, cfg, target)
-		for _, ep := range eps {
-			targets = append(targets, core.CrawlResult{URL: ep})
-		}
+	// Pre-crawl: robots.txt + sitemap
+	if crawlEnabled && useRobots {
+		seedURLs = append(seedURLs, engine.ParseRobotsTxt(client, cfg, target)...)
+		seedURLs = append(seedURLs, engine.ParseSitemap(client, cfg, target)...)
 	}
 
-	totalURLs := len(targets)
-	totalForms := 0
-	for _, t := range targets {
-		totalForms += len(t.Forms)
-	}
-	fmt.Printf("[*] Targets    : %d URL(s), %d form(s) -- %s\n", totalURLs, totalForms, target)
+	// Channel: crawl goroutine feeds pages, scan goroutine consumes
+	pageChan := make(chan core.CrawlResult, 200)
 
-	// ── Per-target scanning (concurrent) ────────────────────────────────────
+	// ── Scan goroutine: consumes pages from channel, scans immediately ────
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, cfg.Threads)
-
-	// Progress tracking (xray-style status line)
 	var doneCount int64
-	totalTargets := len(targets)
-	spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	spinner := []string{"⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"}
 	si := 0
 	progressDone := make(chan struct{})
+	startTime := time.Now()
+	// Use reqSent/reqFailed/reqTotalNS from counting transport (declared above)
 
 	go func() {
-		tick := time.NewTicker(150 * time.Millisecond)
-		defer tick.Stop()
+		tick := time.NewTicker(150 * time.Millisecond); defer tick.Stop()
 		for {
 			select {
 			case <-progressDone:
 				return
 			case <-tick.C:
-				scanned := int(atomic.LoadInt64(&doneCount))
-				pending := totalTargets - scanned
+				done := int(atomic.LoadInt64(&doneCount))
 				sent := int(atomic.LoadInt64(&reqSent))
 				failed := int(atomic.LoadInt64(&reqFailed))
 				ns := atomic.LoadInt64(&reqTotalNS)
-				var avgLatency time.Duration
-				if sent > 0 {
-					avgLatency = time.Duration(ns / int64(sent))
-				}
-				failPct := 0.0
-				if sent > 0 {
-					failPct = float64(failed) / float64(sent) * 100
-				}
+				lat := time.Duration(0)
+				if sent > 0 { lat = time.Duration(ns / int64(sent)) }
+				fp := 0.0
+				if sent > 0 { fp = float64(failed) / float64(sent) * 100 }
+				total := len(targets)
+				targetsMu.Lock()
+				n := len(targets)
+				targetsMu.Unlock()
+				_ = total // suppress unused
 				fmt.Printf("\r\033[K  %s [*] scanned: %d, pending: %d, requestSent: %d, latency: %v, failedRatio: %.2f%%",
-					spinner[si%len(spinner)], scanned, pending, sent, avgLatency.Round(time.Microsecond), failPct)
+					spinner[si%len(spinner)], done, n-done, sent, lat.Round(time.Microsecond), fp)
 				si++
 			}
 		}
 	}()
 
-	for _, tgt := range targets {
+	// scanPage launches a scan goroutine for a single crawl result
+	scanPage := func(t core.CrawlResult) {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(t core.CrawlResult) {
+		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
 			defer func() { atomic.AddInt64(&doneCount, 1) }()
 
-			// ── Resume: skip already-completed URLs ────────────────────
 			if cfg.Checkpoint.IsScanned(t.URL) {
-				if cfg.Verbose {
-					fmt.Printf("    \033[90m[skip] %s (already scanned)\033[0m\n", t.URL)
-				}
+				if cfg.Verbose { fmt.Printf("    \033[90m[skip] %s (already scanned)\033[0m\n", t.URL) }
 				return
 			}
-
-			if cfg.Delay > 0 {
-				time.Sleep(time.Duration(cfg.Delay) * time.Millisecond)
-			}
+			if cfg.Delay > 0 { time.Sleep(time.Duration(cfg.Delay) * time.Millisecond) }
 			var local []core.ScanResult
 			runSQL := !cfg.XSSOnly || cfg.SQLOnly
 			runXSS := !cfg.SQLOnly || cfg.XSSOnly
@@ -998,94 +967,106 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 					local = append(local, modules.ScanBooleanBlindSQLi(client, cfg, t)...)
 				}
 			}
-			if runXSS {
-				local = append(local, modules.ScanXSS(client, cfg, t)...)
-			}
-			if cfg.WS {
-				local = append(local, modules.ScanWebSocket(client, cfg, t.URL)...)
-			}
-			if cfg.OpenRedirect {
-				local = append(local, modules.ScanOpenRedirect(client, cfg, t)...)
-			}
-			if cfg.PathTraversal {
-				local = append(local, modules.ScanPathTraversal(client, cfg, t)...)
-			}
-			if cfg.SSTI {
-				local = append(local, modules.ScanSSTI(client, cfg, t)...)
-			}
-			if cfg.CRLFScan {
-				local = append(local, modules.ScanCRLFInjection(client, cfg, t)...)
-			}
-			if cfg.JSONScan {
-				local = append(local, modules.ScanJSONInjection(client, cfg, t)...)
-			}
-			if cfg.CmdInjection {
-				local = append(local, modules.ScanCmdInjection(client, cfg, t)...)
-			}
-			if cfg.SSRFScan {
-				local = append(local, modules.ScanSSRF(client, cfg, t)...)
-			}
-			if cfg.XXEScan {
-				local = append(local, modules.ScanXXE(client, cfg, t)...)
-			}
-			if cfg.NoSQLScan {
-				local = append(local, modules.ScanNoSQLi(client, cfg, t)...)
-			}
-			// Sprint 4
-			if cfg.FileUpload {
-				local = append(local, modules.ScanFileUpload(client, cfg, t)...)
-			}
-			if cfg.JWTScan {
-				local = append(local, modules.ScanJWT(client, cfg, t)...)
-			}
-			if cfg.IDORScan {
-				local = append(local, modules.ScanIDOR(client, cfg, t)...)
-			}
-			// Sprint 5
-			if cfg.CSRF {
-				local = append(local, modules.ScanCSRF(cfg, t)...)
-			}
-			if cfg.ProtoPollution {
-				local = append(local, modules.ScanProtoPollution(client, cfg, t)...)
-			}
-			if cfg.Deserialize {
-				local = append(local, modules.ScanDeserialize(client, cfg, t)...)
-			}
-			if cfg.LFI {
-				local = append(local, modules.ScanLFI(client, cfg, t)...)
-			}
-			if cfg.Smuggling {
-				local = append(local, modules.ScanSmuggling(client, cfg, t)...)
-			}
-			if cfg.CachePoison {
-				local = append(local, modules.ScanCachePoison(client, cfg, t)...)
-			}
-			// Sprint B
-			if cfg.Clutch {
-				local = append(local, runClutch(client, cfg, t)...)
-			}
-			if cfg.Breach {
-				local = append(local, runBreach(client, cfg, t)...)
-			}
-			if cfg.Grpc {
-				local = append(local, runGrpc(client, cfg, t)...)
-			}
-
-			// ── Checkpoint: persist this URL's results ─────────────────
+			if runXSS { local = append(local, modules.ScanXSS(client, cfg, t)...) }
+			if cfg.WS { local = append(local, modules.ScanWebSocket(client, cfg, t.URL)...) }
+			if cfg.OpenRedirect { local = append(local, modules.ScanOpenRedirect(client, cfg, t)...) }
+			if cfg.PathTraversal { local = append(local, modules.ScanPathTraversal(client, cfg, t)...) }
+			if cfg.SSTI { local = append(local, modules.ScanSSTI(client, cfg, t)...) }
+			if cfg.CRLFScan { local = append(local, modules.ScanCRLFInjection(client, cfg, t)...) }
+			if cfg.JSONScan { local = append(local, modules.ScanJSONInjection(client, cfg, t)...) }
+			if cfg.CmdInjection { local = append(local, modules.ScanCmdInjection(client, cfg, t)...) }
+			if cfg.SSRFScan { local = append(local, modules.ScanSSRF(client, cfg, t)...) }
+			if cfg.XXEScan { local = append(local, modules.ScanXXE(client, cfg, t)...) }
+			if cfg.NoSQLScan { local = append(local, modules.ScanNoSQLi(client, cfg, t)...) }
+			if cfg.FileUpload { local = append(local, modules.ScanFileUpload(client, cfg, t)...) }
+			if cfg.JWTScan { local = append(local, modules.ScanJWT(client, cfg, t)...) }
+			if cfg.IDORScan { local = append(local, modules.ScanIDOR(client, cfg, t)...) }
+			if cfg.CSRF { local = append(local, modules.ScanCSRF(cfg, t)...) }
+			if cfg.ProtoPollution { local = append(local, modules.ScanProtoPollution(client, cfg, t)...) }
+			if cfg.Deserialize { local = append(local, modules.ScanDeserialize(client, cfg, t)...) }
+			if cfg.LFI { local = append(local, modules.ScanLFI(client, cfg, t)...) }
+			if cfg.Smuggling { local = append(local, modules.ScanSmuggling(client, cfg, t)...) }
+			if cfg.CachePoison { local = append(local, modules.ScanCachePoison(client, cfg, t)...) }
+			if cfg.Clutch { local = append(local, runClutch(client, cfg, t)...) }
+			if cfg.Breach { local = append(local, runBreach(client, cfg, t)...) }
+			if cfg.Grpc { local = append(local, runGrpc(client, cfg, t)...) }
 			cfg.Checkpoint.MarkScanned(t.URL, local)
-
-			if len(local) > 0 {
-				mu.Lock()
-				allResults = append(allResults, local...)
-				mu.Unlock()
-			}
-		}(tgt)
+			if len(local) > 0 { mu.Lock(); allResults = append(allResults, local...); mu.Unlock() }
+		}()
 	}
+
+	// ── Crawl goroutine: fetches pages and feeds them into channel ────────
+	crawlDone := make(chan struct{})
+	go func() {
+		defer close(crawlDone)
+
+		if crawlEnabled {
+			cr := engine.NewCrawler(client, cfg)
+			cr.OnPage = func(page core.CrawlResult, n int) {
+				targetsMu.Lock()
+				targets = append(targets, page)
+				totalForms += len(page.Forms)
+				targetsMu.Unlock()
+				pageChan <- page // send to scan consumer immediately
+			}
+			cr.Crawl(target, depth)
+
+			// Seed URLs
+			seen := make(map[string]bool)
+			targetsMu.Lock()
+			for _, tr := range targets { seen[tr.URL] = true }
+			targetsMu.Unlock()
+			for _, su := range seedURLs {
+				if !seen[su] {
+					seen[su] = true
+					fs, _ := engine.FetchForms(client, cfg, su)
+					p := core.CrawlResult{URL: su, Forms: fs}
+					targetsMu.Lock()
+					targets = append(targets, p)
+					totalForms += len(p.Forms)
+					targetsMu.Unlock()
+					pageChan <- p
+				}
+			}
+		} else {
+			// No crawl: just fetch single target
+			fs, _ := engine.FetchForms(client, cfg, target)
+			targets = []core.CrawlResult{{URL: target, Forms: fs}}
+			totalForms = len(fs)
+			for _, t := range targets { pageChan <- t }
+			close(pageChan)
+			return
+		}
+
+		// JS endpoints
+		if cfg.JSEndpoints {
+			eps := engine.ExtractJSEndpoints(client, cfg, target)
+			for _, ep := range eps {
+				p := core.CrawlResult{URL: ep}
+				targetsMu.Lock()
+				targets = append(targets, p)
+				targetsMu.Unlock()
+				pageChan <- p
+			}
+		}
+
+		close(pageChan) // signal scan consumer: no more pages
+	}()
+
+	// ── Scan consumer: reads channel, fires scan goroutines ───────────────
+	for t := range pageChan {
+		scanPage(t)
+	}
+	<-crawlDone // crawl goroutine finished
+
 	wg.Wait()
 	close(progressDone)
-	fmt.Printf("\r\033[K  \033[32m✓\033[0m %d URL(s) scanned\n", totalTargets)
 
-	// ── Header / cookie injection (root target only, expensive) ────────────
+	totalURLs = len(targets)
+	fmt.Printf("[*] Targets    : %d URL(s), %d form(s) -- %s\n", totalURLs, totalForms, target)
+	fmt.Printf("\r\033[K  \033[32m✓\033[0m %d URL(s) scanned in %v\n", totalURLs, time.Since(startTime).Round(time.Millisecond))
+
+// ── Header / cookie injection (root target only, expensive) ────────────
 	root := core.CrawlResult{URL: target}
 	if cfg.HeaderScan {
 		allResults = append(allResults, modules.ScanHeaderInjection(client, cfg, root)...)

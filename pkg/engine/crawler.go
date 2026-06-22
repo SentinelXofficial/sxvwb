@@ -18,6 +18,7 @@ type Crawler struct {
 	visited  map[string]bool
 	mu       sync.Mutex
 	baseHost string
+	OnPage   func(core.CrawlResult, int) // streaming callback
 }
 
 func NewCrawler(client *http.Client, cfg *core.Config) *Crawler {
@@ -87,7 +88,11 @@ func (c *Crawler) Crawl(startURL string, maxDepth int) []core.CrawlResult {
 			}
 			continue
 		}
-		results = append(results, core.CrawlResult{URL: item.u, Forms: forms})
+		cr := core.CrawlResult{URL: item.u, Forms: forms}
+		results = append(results, cr)
+		if c.OnPage != nil {
+			c.OnPage(cr, len(results))
+		}
 
 		if item.depth < maxDepth {
 			for _, lnk := range links {
