@@ -943,11 +943,11 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 		}
 	}()
 
-	// scanPage launches a scan goroutine for a single crawl result
+	// scanPage launches a scan goroutine (non-blocking: sem acquired inside goroutine)
 	scanPage := func(t core.CrawlResult) {
 		wg.Add(1)
-		sem <- struct{}{}
 		go func() {
+			sem <- struct{}{} // block here, not in the channel consumer
 			defer wg.Done()
 			defer func() { <-sem }()
 			defer func() { atomic.AddInt64(&doneCount, 1) }()
