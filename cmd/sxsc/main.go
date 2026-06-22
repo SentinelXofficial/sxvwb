@@ -929,12 +929,38 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, cfg.Threads)
 
+	// Progress tracking
+	var doneCount int
+	var doneMu sync.Mutex
+	totalTargets := len(targets)
+	spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	si := 0
+	progressDone := make(chan struct{})
+
+	go func() {
+		tick := time.NewTicker(120 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-progressDone:
+				return
+			case <-tick.C:
+				doneMu.Lock()
+				d := doneCount
+				doneMu.Unlock()
+				fmt.Printf("\r\033[K  %s Scanning... %d/%d URLs", spinner[si%len(spinner)], d, totalTargets)
+				si++
+			}
+		}
+	}()
+
 	for _, tgt := range targets {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(t core.CrawlResult) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer func() { doneMu.Lock(); doneCount++; doneMu.Unlock() }()
 
 			// ── Resume: skip already-completed URLs ────────────────────
 			if cfg.Checkpoint.IsScanned(t.URL) {
@@ -1041,6 +1067,8 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 		}(tgt)
 	}
 	wg.Wait()
+	close(progressDone)
+	fmt.Printf("\r\033[K  \033[32m✓\033[0m %d URL(s) scanned\n", totalTargets)
 
 	// ── Header / cookie injection (root target only, expensive) ────────────
 	root := core.CrawlResult{URL: target}

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/net/html"
 )
@@ -41,7 +42,11 @@ func (c *Crawler) Crawl(startURL string, maxDepth int) []core.CrawlResult {
 	}
 	var results []core.CrawlResult
 	queue := []qitem{{u: startURL, depth: 0}}
-	head := 0 // ring-buffer head — avoids queue = queue[1:] memory churn
+	head := 0
+
+	spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	si := 0
+	lastPrint := time.Now()
 
 	for head < len(queue) {
 		if c.cfg.MaxPages > 0 && len(results) >= c.cfg.MaxPages {
@@ -66,6 +71,13 @@ func (c *Crawler) Crawl(startURL string, maxDepth int) []core.CrawlResult {
 		}
 		if c.cfg.Verbose {
 			fmt.Printf("  \033[90m[crawl] depth=%d %s\033[0m\n", item.depth, item.u)
+		}
+
+		// Real-time progress tick (every 80ms to avoid flooding terminal)
+		if time.Since(lastPrint) > 80*time.Millisecond {
+			fmt.Printf("\r\033[K  %s Crawling... %d pages | %d queued", spinner[si%len(spinner)], len(results), len(queue)-head)
+			si++
+			lastPrint = time.Now()
 		}
 
 		links, forms, err := c.fetchPage(item.u)
@@ -95,7 +107,7 @@ func (c *Crawler) Crawl(startURL string, maxDepth int) []core.CrawlResult {
 			head = 0
 		}
 	}
-	fmt.Printf("\033[36m[*] Crawled %d page(s)\033[0m\n", len(results))
+	fmt.Printf("\r\033[K\033[36m[*] Crawled %d page(s), %d form(s)\033[0m\n", len(results), countForms(results))
 	return results
 }
 
@@ -304,3 +316,11 @@ func MatchScope(pattern, host, fullURL string) bool {
 	return host == pat
 }
 
+
+func countForms(results []core.CrawlResult) int {
+	n := 0
+	for _, r := range results {
+		n += len(r.Forms)
+	}
+	return n
+}
