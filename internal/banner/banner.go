@@ -2,6 +2,7 @@ package banner
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/SentinelXofficial/sxvwb/internal/color"
 	"github.com/SentinelXofficial/sxvwb/internal/updater"
@@ -21,7 +22,19 @@ func Print() {
 	fmt.Println()
 	printRestrictionNotice()
 	fmt.Println()
+	printLicenseStatus()
 	printVersionInfo()
+}
+
+func printLicenseStatus() {
+	key := os.Getenv("SXVWB_LICENSE")
+	if key == "" {
+		fmt.Println(color.YEL + "  [!] No license key set. Get one at https://api.sentinelx.me/register" + color.RST)
+		fmt.Println(color.YEL + "  [!] Set with: export SXVWB_LICENSE=your-key" + color.RST)
+	} else {
+		short := key[:14] + "..." + key[len(key)-8:]
+		fmt.Println(color.GRN + "  [✓] License: " + short + color.RST)
+	}
 }
 
 func printRestrictionNotice() {
