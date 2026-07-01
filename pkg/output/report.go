@@ -446,39 +446,49 @@ func SaveCSVReport(results []core.ScanResult, filename string) error {
 }
 
 func PrintConsoleReport(results []core.ScanResult, target string, elapsed time.Duration, totalURLs, totalForms int) {
-	fmt.Println("\n" + strings.Repeat("-", 60))
-	fmt.Println("SCAN REPORT")
-	fmt.Println(strings.Repeat("-", 60))
-	fmt.Printf("Target   : %s\n", target)
-	fmt.Printf("Duration : %s\n", elapsed.Round(time.Millisecond))
-	fmt.Printf("Scanned  : %d URL(s), %d form(s)\n", totalURLs, totalForms)
+	fmt.Println()
+	fmt.Printf("[+] Target: %s\n", target)
+	fmt.Printf("[+] Duration: %v\n", elapsed.Round(time.Millisecond))
+	fmt.Printf("[+] Scanned: %d URL(s), %d form(s)\n", totalURLs, totalForms)
 
 	stats := ComputeStats(results, totalURLs, totalForms)
-	fmt.Printf("Findings : %d total  HIGH:%d  MEDIUM:%d  LOW:%d  INFO:%d\n\n",
+	fmt.Printf("[+] Findings: %d total | HIGH:%d MEDIUM:%d LOW:%d INFO:%d\n",
 		len(results), stats.HighCount, stats.MediumCount, stats.LowCount, stats.InfoCount)
 
 	if len(results) == 0 {
-		fmt.Println("[OK] No vulnerabilities detected")
-		fmt.Println("[!]  This does not guarantee the target is fully secure")
+		fmt.Println("[+] No vulnerabilities detected")
 		return
 	}
 
 	for i, v := range results {
-		sc := "\033[33m"
-		if v.Severity == "HIGH" {
-			sc = "\033[31m"
-		} else if v.Severity == "LOW" {
-			sc = "\033[32m"
-		} else if v.Severity == "INFO" {
-			sc = "\033[36m"
+		tag := "MEDIUM"
+		sevColor := ""
+		switch v.Severity {
+		case "CRITICAL", "HIGH":
+			tag = "HIGH"
+		case "LOW":
+			tag = "LOW"
+		case "INFO":
+			tag = "INFO"
 		}
-		fmt.Printf("\033[1m[%d] %s\033[0m\n", i+1, v.Type)
-		fmt.Printf("    %-12s : %s%s\033[0m  (CVSS %s)\n", "Severity", sc, v.Severity, CVSSFor(v.Type))
-		fmt.Printf("    %-12s : %s\n", "Method", v.Method)
-		fmt.Printf("    %-12s : %s\n", "Parameter", v.Parameter)
-		fmt.Printf("    %-12s : %s\n", "Payload", v.Payload)
-		fmt.Printf("    %-12s : %s\n", "Evidence", v.Evidence)
-		fmt.Printf("    %-12s : %s\n\n", "URL", v.URL)
+		fmt.Printf("\n[Vuln: %s]\n", v.Type)
+		fmt.Printf("Target           %q\n", v.URL)
+		fmt.Printf("VulnType         %q\n", v.Type)
+		if v.Severity != "" {
+			fmt.Printf("Severity         %s\n", v.Severity)
+		}
+		if v.Parameter != "" {
+			fmt.Printf("Parameter        %q\n", v.Parameter)
+		}
+		if v.Payload != "" {
+			fmt.Printf("Payload          %q\n", v.Payload)
+		}
+		if v.Evidence != "" {
+			fmt.Printf("Evidence         %q\n", v.Evidence)
+		}
+		_ = i
+		_ = tag
+		_ = sevColor
 	}
-	fmt.Println("[!] DISCLAIMER: Only test on systems you own or have explicit written permission to test.")
+	fmt.Println()
 }

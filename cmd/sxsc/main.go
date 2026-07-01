@@ -860,11 +860,11 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 	if cfg.WAFAutoDetect {
 		wafResult := modules.AutoDetectWAF(client, cfg, target)
 		if wafResult.Detected {
-			fmt.Printf("\033[33m[~] WAF Vendor   : %s (%s)\033[0m\n", wafResult.Vendor, wafResult.Evidence)
+			fmt.Printf("[~] WAF detected: %s (%s)\n", wafResult.Vendor, wafResult.Evidence)
 			cfg.WAFBypass = true
-			fmt.Printf("\033[33m[~] WAF Bypass   : auto-enabled\033[0m\n")
+			fmt.Printf("[~] WAF Bypass: auto-enabled\n")
 		} else {
-			fmt.Printf("\033[32m[✓] WAF Detect   : No WAF detected\033[0m\n")
+			fmt.Printf("[+] WAF: not detected\n")
 		}
 	}
 
@@ -910,14 +910,12 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, cfg.Threads)
 	var doneCount int64
-	spinner := []string{"⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"}
-	si := 0
 	progressDone := make(chan struct{})
 	startTime := time.Now()
 	// Use reqSent/reqFailed/reqTotalNS from counting transport (declared above)
 
 	go func() {
-		tick := time.NewTicker(150 * time.Millisecond); defer tick.Stop()
+		tick := time.NewTicker(2 * time.Second); defer tick.Stop()
 		for {
 			select {
 			case <-progressDone:
@@ -931,14 +929,11 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 				if sent > 0 { lat = time.Duration(ns / int64(sent)) }
 				fp := 0.0
 				if sent > 0 { fp = float64(failed) / float64(sent) * 100 }
-				total := len(targets)
 				targetsMu.Lock()
 				n := len(targets)
 				targetsMu.Unlock()
-				_ = total // suppress unused
-				fmt.Printf("\r\033[K  %s [*] scanned: %d, pending: %d, requestSent: %d, latency: %v, failedRatio: %.2f%%",
-					spinner[si%len(spinner)], done, n-done, sent, lat.Round(time.Microsecond), fp)
-				si++
+				fmt.Printf("\r\033[K[*] scanned: %d, pending: %d, requestSent: %d, latency: %v, failedRatio: %.1f%%",
+					done, n-done, sent, lat.Round(time.Millisecond), fp)
 			}
 		}
 	}()
@@ -1063,8 +1058,7 @@ func scanTarget(client *http.Client, cfg *core.Config, target string, useRobots 
 	close(progressDone)
 
 	totalURLs = len(targets)
-	fmt.Printf("[*] Targets    : %d URL(s), %d form(s) -- %s\n", totalURLs, totalForms, target)
-	fmt.Printf("\r\033[K  \033[32m✓\033[0m %d URL(s) scanned in %v\n", totalURLs, time.Since(startTime).Round(time.Millisecond))
+	fmt.Printf("\r\033[K[+] %d URL(s) scanned in %v\n", totalURLs, time.Since(startTime).Round(time.Millisecond))
 
 // ── Header / cookie injection (root target only, expensive) ────────────
 	root := core.CrawlResult{URL: target}
