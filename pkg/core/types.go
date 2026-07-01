@@ -100,14 +100,18 @@ type Config struct {
 }
 
 type ScanResult struct {
-	Type      string    `json:"type"`
-	URL       string    `json:"url"`
-	Method    string    `json:"method"`
-	Parameter string    `json:"parameter"`
-	Payload   string    `json:"payload"`
-	Severity  string    `json:"severity"`
-	Evidence  string    `json:"evidence"`
-	Timestamp time.Time `json:"timestamp"`
+	Type       string    `json:"type"`
+	URL        string    `json:"url"`
+	Method     string    `json:"method"`
+	Parameter  string    `json:"parameter"`
+	Payload    string    `json:"payload"`
+	Severity   string    `json:"severity"`
+	Evidence   string    `json:"evidence"`
+	Timestamp  time.Time `json:"timestamp"`
+	ParamKey   string    `json:"param_key,omitempty"`
+	ParamValue string    `json:"param_value,omitempty"`
+	Position   string    `json:"position,omitempty"`
+	Extra      map[string]string `json:"extra,omitempty"`
 }
 
 type Form struct {

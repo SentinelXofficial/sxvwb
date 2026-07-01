@@ -461,21 +461,14 @@ func PrintConsoleReport(results []core.ScanResult, target string, elapsed time.D
 	}
 
 	for i, v := range results {
-		tag := "MEDIUM"
-		sevColor := ""
-		switch v.Severity {
-		case "CRITICAL", "HIGH":
-			tag = "HIGH"
-		case "LOW":
-			tag = "LOW"
-		case "INFO":
-			tag = "INFO"
-		}
 		fmt.Printf("\n[Vuln: %s]\n", v.Type)
 		fmt.Printf("Target           %q\n", v.URL)
 		fmt.Printf("VulnType         %q\n", v.Type)
 		if v.Severity != "" {
-			fmt.Printf("Severity         %s\n", v.Severity)
+			fmt.Printf("Severity         %q\n", v.Severity)
+		}
+		if v.Method != "" {
+			fmt.Printf("Method           %q\n", v.Method)
 		}
 		if v.Parameter != "" {
 			fmt.Printf("Parameter        %q\n", v.Parameter)
@@ -483,12 +476,22 @@ func PrintConsoleReport(results []core.ScanResult, target string, elapsed time.D
 		if v.Payload != "" {
 			fmt.Printf("Payload          %q\n", v.Payload)
 		}
+		if v.Position != "" {
+			fmt.Printf("Position         %q\n", v.Position)
+		}
+		if v.ParamKey != "" {
+			fmt.Printf("ParamKey         %q\n", v.ParamKey)
+		}
+		if v.ParamValue != "" {
+			fmt.Printf("ParamValue       %q\n", v.ParamValue)
+		}
 		if v.Evidence != "" {
 			fmt.Printf("Evidence         %q\n", v.Evidence)
 		}
+		for k, val := range v.Extra {
+			fmt.Printf("%-16s %q\n", k, val)
+		}
 		_ = i
-		_ = tag
-		_ = sevColor
 	}
 	fmt.Println()
 }
