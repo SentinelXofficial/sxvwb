@@ -45,7 +45,6 @@ func (c *Crawler) Crawl(startURL string, maxDepth int) []core.CrawlResult {
 	queue := []qitem{{u: startURL, depth: 0}}
 	head := 0
 
-	spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	si := 0
 	lastPrint := time.Now()
 
@@ -76,7 +75,7 @@ func (c *Crawler) Crawl(startURL string, maxDepth int) []core.CrawlResult {
 
 		// Real-time progress tick (every 80ms to avoid flooding terminal)
 		if time.Since(lastPrint) > 80*time.Millisecond {
-			fmt.Printf("\r\033[K  %s Crawling... %d pages | %d queued", spinner[si%len(spinner)], len(results), len(queue)-head)
+			fmt.Printf("\r\033[K[*] crawl: %d pages, %d queued", len(results), len(queue)-head)
 			si++
 			lastPrint = time.Now()
 		}
@@ -112,7 +111,7 @@ func (c *Crawler) Crawl(startURL string, maxDepth int) []core.CrawlResult {
 			head = 0
 		}
 	}
-	fmt.Printf("\r\033[K\033[36m[*] Crawled %d page(s), %d form(s)\033[0m\n", len(results), countForms(results))
+	fmt.Printf("\r\033[K[+] Crawled %d page(s), %d form(s)\n", len(results), countForms(results))
 	return results
 }
 
