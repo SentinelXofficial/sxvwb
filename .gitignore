@@ -1,0 +1,28 @@
+# Binary
+sxvwb
+/sxvwb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test output
+/tmp/
+result*.json
+
+# Checkpoint
+.sxsc_checkpoint
+
+# Dependencies
+vendor/
+
+# Local config
+.claude/
+.claude/
